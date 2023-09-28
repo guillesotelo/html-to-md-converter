@@ -13,6 +13,7 @@ destination_folder = '/home/guillermo/Portal/py/md_converter/test1/source/ARTPLA
 index_file = '/home/guillermo/Portal/py/md_converter/test1/ARTPLATSWS/index.html'
 toctree_rst_file = '/home/guillermo/Portal/py/md_converter/test1/source/ARTPLATSWS/index.rst'
 index_rst = '/home/guillermo/Portal/py/md_converter/test1/source/ARTPLATSWS/index.rst'
+allowed_formats = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.log', '.yaml', '.eml']
 
 
 class HTMLToMarkdownConverter:
@@ -61,7 +62,7 @@ class HTMLToMarkdownConverter:
             for img_tag in img_tags:
                 src = img_tag.get("src", "")
                 alt_text = img_tag.get("alt", "Image").strip() or src
-                img = f" ![{alt_text}]({src}) "
+                img = f" ![{alt_text}]({parse_image_url(src)}) "
                 if self.check_url(src) and not '/thumbnail/' in src:
                     if not img in processed_text:
                         self.processed_links.append(img)
@@ -91,7 +92,7 @@ class HTMLToMarkdownConverter:
         alt_text = tag.get("alt", "Image")
         src = tag.get("src", "")
         if self.check_url(src) and not '/thumbnail/' in src:
-            self.markdown += f"![{alt_text.strip()}]({src}) "
+            self.markdown += f"![{alt_text.strip()}]({parse_image_url(src)}) "
 
     def handle_list(self, tag):
         list_items = [li.get_text() for li in tag.find_all("li")]
@@ -130,7 +131,7 @@ class HTMLToMarkdownConverter:
         for img_tag in img_tags:
             src = img_tag.get("src", "")
             alt_text = img_tag.get("alt", "Image") or src
-            img = f"![{alt_text}]({src}) "
+            img = f"![{alt_text}]({parse_image_url(src)}) "
             if self.check_url(src) and not '/thumbnail/' in src:
 
                 if img_tag.parent:
@@ -304,10 +305,16 @@ def clean_text(text):
     return re.sub(r' +', ' ', re.sub(r'\n\n+', '\n\n', text.strip()))
 
 
-def replace_filename(name, table):
-    if name in table:
-        return table[name]
-    return name.replace('.html', '.md')
+def parse_image_url(url):
+    if 'download/resources' in url:
+        return f'https://confluence.volvocars.biz/display/{url}'
+    return url
+
+
+def replace_filename(file_path, table):
+    if file_path in table:
+        return table[file_path]
+    return convert_to_valid_url(file_path)
 
 
 def extract_toc_structure(html_file):
@@ -330,7 +337,7 @@ def extract_toc_structure(html_file):
             text = re.sub(r' +', ' ', anchor.get_text().replace('\n', ' '))
             indentation = calculate_indentation(anchor)
 
-            url = convert_to_valid_url(text)
+            url = convert_to_valid_url(anchor.get_text())
 
             toc_structure.append(
                 {'text': text, 'link': url, 'indentation': indentation})
@@ -363,7 +370,7 @@ def create_toc_tree(toc_structure):
 def convert_to_valid_url(input_string):
     url_string = re.sub(
         r' +', ' ', input_string.replace('\n', ' ')).replace(' ', '_')
-    url_string = urllib.parse.quote(url_string, safe=':()?&=#').replace('~', '').replace('*', '')
+    url_string = urllib.parse.quote(url_string, safe=":()?&=#*'%").replace('~', '')
     return url_string.replace('.html', '.md')
 
 
@@ -406,12 +413,23 @@ def find_value_recursive(data, target_key):
     return None
 
 
-def check_local_files(path):
+def check_local_asset(path):
     # Check if the link path is local and the file exists
     # If not exists, change the path in order to take the file/page from Confluence
+    local_path = ''
     with open(path, 'r', encoding='utf-8') as file:
         if file:
-            return True
+            return path
+        else:
+            for root, _, files in os.walk(source_folder):
+                for file_name in files:
+                    local_file = os.path.join(root, file_name)
+                    with open(local_file, 'r', encoding='utf-8') as file:
+                        if file:
+                            local_path = local_file
+            return local_path or path.replace('', 'https://confluence.com/')
+                
+                    
 
 
 def run_conversion():
@@ -424,7 +442,6 @@ def run_conversion():
     toc_structure = extract_toc_structure(index_file)
     toc_tree = create_toc_tree(toc_structure)
     filename_len = 20
-    image_formats = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.log', '.yaml', '.eml']
 
     write_index_rst(toc_tree, index_rst, 'ARTPLATSWS')
 
@@ -460,10 +477,11 @@ def run_conversion():
                             write_toctree(toc_tree, file, table[file_name])
 
                 else:
-                    for format in image_formats:
+                    for format in allowed_formats:
                         if file_name.endswith(format) or (file_name.isdigit() and not '.' in file_name):
                             shutil.copyfile(source_file_path,
                                             destination_file_path)
+                            
                 n += 1
 
             except Exception as e:
